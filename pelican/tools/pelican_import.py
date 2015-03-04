@@ -432,6 +432,43 @@ def tumblr2fields(api_key, blogname):
         offset += len(posts)
         posts = get_tumblr_posts(api_key, blogname, offset)
 
+def octopress2fields(file, author_name):
+    """Opens a octopress export zip file, and yield pelican fields"""
+    import zipfile
+
+    def octopress_parse(lines):
+        with open(md, 'r', encoding='utf-8') as f:
+            lines = (line.rstrip('\n') for line in f)
+            in_yaml = False
+            metadata = {}
+            content = []
+            for line in lines:
+                if line == '---' and not in_yaml:
+                    in_yaml = True
+                elif line == '---' and in_yaml:
+                    in_yaml = False
+                elif in_yaml:
+                    m = re.match(r"(\w+): (.*)", line)
+                    metadata[m.group(1)] = m.group(2)
+                else:
+                    line = line.rstrip('\r') + '  '
+                    content.append(line)
+            return metadata, '\n'.join(content)
+
+    z = zipfile.ZipFile(file, 'r')
+    for md in z.namelist():
+        z.extract(md)
+        metadata, content = octopress_parse(md)
+        title = metadata['title'][1:-1]
+        slug = slugify(metadata['title'])
+        date = metadata['date']
+        tags = metadata['categories'][1:-1].split(', ')
+        categories = [tags[0]]
+        kind = 'article'
+        yield (title, content, slug, date, author_name, categories, tags, kind, 'markdown')
+        os.remove(md)
+    z.close()
+
 def feed2fields(file):
     """Read a feed and yield pelican fields"""
     import feedparser
@@ -700,6 +737,8 @@ def main():
         help='Posterous export')
     parser.add_argument('--tumblr', action='store_true', dest='tumblr',
         help='Tumblr export')
+    parser.add_argument('--octopress', action='store_true', dest='octopress',
+        help='octopress export')
     parser.add_argument('--feed', action='store_true', dest='feed',
         help='Feed to parse')
     parser.add_argument('-o', '--output', dest='output', default='output',
@@ -740,6 +779,8 @@ def main():
         help="Password (posterous import only)")
     parser.add_argument('-b', '--blogname', dest='blogname',
         help="Blog name (Tumblr import only)")
+    parser.add_argument('-a', '--author', dest='octopress_author',
+        help="Author name (octopress import only)")
 
     args = parser.parse_args()
 
@@ -752,10 +793,12 @@ def main():
         input_type = 'posterous'
     elif args.tumblr:
         input_type = 'tumblr'
+    elif args.octopress:
+        input_type = 'octopress'
     elif args.feed:
         input_type = 'feed'
     else:
-        error = "You must provide either --wpfile, --dotclear, --posterous, --tumblr or --feed options"
+        error = "You must provide either --wpfile, --dotclear, --posterous, --tumblr, --octopress or --feed options"
         exit(error)
 
     if not os.path.exists(args.output):
@@ -777,6 +820,8 @@ def main():
         fields = posterous2fields(args.input, args.email, args.password)
     elif input_type == 'tumblr':
         fields = tumblr2fields(args.input, args.blogname)
+    elif input_type == 'octopress':
+        fields = octopress2fields(args.input, args.octopress_author)
     elif input_type == 'feed':
         fields = feed2fields(args.input)
 
